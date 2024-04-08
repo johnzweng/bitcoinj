@@ -971,8 +971,33 @@ public class ECKey implements EncryptableItem {
         // 1.0 For j from 0 to h   (h == recId here and the loop is outside this function)
         //   1.1 Let x = r + jn
         BigInteger n = CURVE.getN();  // Curve order.
+
+
+        // Readable meaning of "recId":
+        // - recId 0:  k_was_greater_than_n = false,  y_of_R_is_odd = false
+        // - recId 1:  k_was_greater_than_n = false,  y_of_R_is_odd = true
+        // - recId 2:  k_was_greater_than_n = true,   y_of_R_is_odd = false
+        // - recId 3:  k_was_greater_than_n = true,   y_of_R_is_odd = true
+
+        // It is very very unlikely (but not impossible) to ever see recId 2 or 3
+        // The chances are 1 to 2.677766 * 10^38   (n/(p-n))
+
         BigInteger i = BigInteger.valueOf((long) recId / 2);
-        BigInteger x = sig.r.add(i.multiply(n));
+        boolean k_was_greater_than_n;
+        if (i.intValue() == 0) {
+            k_was_greater_than_n = false;
+        } else {
+            k_was_greater_than_n = true;
+        }
+
+        boolean y_of_R_is_odd = ((recId & 1) == 1);
+        BigInteger full_x_coordinate_of_R;
+        if (k_was_greater_than_n) {
+            full_x_coordinate_of_R = sig.r.add(n);
+        } else {
+            full_x_coordinate_of_R = sig.r;
+        }
+
         //   1.2. Convert the integer x to an octet string X of length mlen using the conversion routine
         //        specified in Section 2.3.7, where mlen = ⌈(log2 p)/8⌉ or mlen = ⌈m/8⌉.
         //   1.3. Convert the octet string (16 set binary digits)||X to an elliptic curve point R using the
@@ -981,13 +1006,13 @@ public class ECKey implements EncryptableItem {
         //
         // More concisely, what these points mean is to use X as a compressed public key.
         BigInteger prime = SecP256K1Curve.q;
-        if (x.compareTo(prime) >= 0) {
+        if (full_x_coordinate_of_R.compareTo(prime) >= 0) {
             // Cannot have point co-ordinates larger than this as everything takes place modulo Q.
             return null;
         }
         // Compressed keys require you to know an extra bit of data about the y-coord as there are two possibilities.
         // So it's encoded in the recId.
-        ECPoint R = decompressKey(x, (recId & 1) == 1);
+        ECPoint R = decompressKey(full_x_coordinate_of_R, y_of_R_is_odd);
         //   1.4. If nR != point at infinity, then do another iteration of Step 1 (callers responsibility).
         if (!R.multiply(n).isInfinity())
             return null;
@@ -1013,10 +1038,10 @@ public class ECKey implements EncryptableItem {
     }
 
     /** Decompress a compressed public key (x co-ord and low-bit of y-coord). */
-    private static ECPoint decompressKey(BigInteger xBN, boolean yBit) {
+    private static ECPoint decompressKey(BigInteger xBN, boolean useOddY) {
         X9IntegerConverter x9 = new X9IntegerConverter();
         byte[] compEnc = x9.integerToBytes(xBN, 1 + x9.getByteLength(CURVE.getCurve()));
-        compEnc[0] = (byte)(yBit ? 0x03 : 0x02);
+        compEnc[0] = (byte)(useOddY ? 0x03 : 0x02);
         return CURVE.getCurve().decodePoint(compEnc);
     }
 
